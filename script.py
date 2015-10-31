@@ -3,7 +3,7 @@ from threading import Thread
 from time import time
 import MySQLdb
 import logging,sys
-from utils import get_contact_info
+from utils import get_contact_info,update_table
 
 TABLE = "googleimagefound"
 DB_HOST = "localhost"
@@ -29,33 +29,31 @@ class GetContactInfo(Thread):
 		self.queue = queue
 		self.cursor = cursor
 
-
 	def run(self):
 		global successfull
 		while True:
 			url,sql_id = self.queue.get()
 			impressum = get_contact_info(url)
-			if impressum is not None:
-				# update_db(self.cursor,impressum,sql_id)
-				logger.info("Updated sql id:%s URL: %s ===> Impressum: %s",sql_id,url,impressum)
-				if impressum != "http://www.bildplagiat.de":
-					successfull += 1
+			update_db(self.cursor,impressum,sql_id)
+			if impressum != "http://www.bildplagiat.de":
+				logger.info("Updated sql id:%s URL: %s ===> Imprint: %s",sql_id,url,impressum)
+				successfull += 1
 			else:
-				logger.info("Failed to update impressum for id: %s",sql_id)
+				logger.info("Updated sql id:%s URL: %s ===> Default Imprint: %s",sql_id,url,impressum)
 			self.queue.task_done()
 
 
 
 def get_urls(table,flag=0):
-	sql = 'select page_url,id from %s where imprint=\"\" '%(table) #add semicolon
+	sql = 'select page_url,id from %s where imprint=\"\" ;'%(table) #add semicolon
 	if flag:
 		sql=sql[0:-1] + " and ( "
 		for country in COUNTRIES_LIST:
 			if country != COUNTRIES_LIST[-1]:
 				sql+= 'IP = \"%s\" OR '%(country)
 			else:
-				sql+= 'IP = \"%s\" )'%(country) #add the semicolon
-	sql += " limit 20;"
+				sql+= 'IP = \"%s\" );'%(country) #add the semicolon
+	# sql = sql[0:-1] + " limit 50;"
 	cur = db.cursor()
 	cur.execute(sql)
 	data = cur.fetchall()
@@ -83,12 +81,11 @@ def main():
 	else:
 		result = get_urls(TABLE)
 	queue = Queue()
-
   # Create worker threads
-	for x in range(8):
+	for x in range(NUM_THREADS):
 		worker = GetContactInfo(x,queue,db.cursor())
-   	worker.daemon = True
-   	worker.start()
+		worker.daemon = True
+		worker.start()
 
 	for data in result:
 		logger.info("Queueing %s",data[0])
@@ -96,7 +93,7 @@ def main():
   # Causes the main thread to wait for the queue to finish processing all the tasks
 	queue.join()
 	success_rate = (successfull / float(len(result)))*100
-	logger.info('Took {}'.format(time() - ts))
+	logger.info('Took {}'.format	(time() - ts))
 	logger.info("Success Rate: %s %%",success_rate)
 
 if __name__ == "__main__":
